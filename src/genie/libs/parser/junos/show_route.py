@@ -1936,6 +1936,7 @@ class ShowRouteAdvertisingProtocol(ShowRouteAdvertisingProtocolSchema):
             m = p2.match(line)
             if m:
                 group = m.groupdict()
+
                 rt_list = route_table_dict.setdefault('rt', [])
                 rt_dict = {'rt-destination': group['rt_destination']}
                 rt_entry_dict = rt_dict.setdefault('rt-entry', {})

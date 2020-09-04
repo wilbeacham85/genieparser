@@ -4,6 +4,392 @@ from genie.metaparser import MetaParser
 from genie.metaparser.util.schemaengine import Any, Optional
 
 
+# ======================
+# Schema for:
+#  * 'show cts rbacl'
+# ======================
+class ShowCtsRbaclSchema(MetaParser):
+    """Schema for show cts rbacl."""
+
+    schema = {
+        "cts_rbacl": {
+            "ip_ver_support": str,
+            "name": {
+                str: {
+                    "ip_protocol_version": str,
+                    "refcnt": int,
+                    "flag": str,
+                    "stale": bool,
+                    "aces": {
+                        Optional(int): {
+                            Optional("action"): str,
+                            Optional("protocol"): str,
+                            Optional("direction"): str,
+                            Optional("port"): int
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+# ======================
+# Parser for:
+#  * 'show cts rbacl'
+# ======================
+class ShowCtsRbacl(ShowCtsRbaclSchema):
+    """Parser for show cts rbacl"""
+
+    cli_command = 'show cts rbacl'
+
+    def cli(self, output=None):
+        if output is None:
+            out = self.device.execute(self.cli_command)
+        else:
+            out = output
+
+        cts_rbacl_dict = {}
+        # CTS RBACL Policy
+        # ================
+        # RBACL IP Version Supported: IPv4 & IPv6
+        #   name   = TCP_51005-01
+        #   IP protocol version = IPV4
+        #   refcnt = 2
+        #   flag   = 0x41000000
+        #   stale  = FALSE
+        #   RBACL ACEs:
+        #     permit tcp dst eq 51005
+        #
+        #   name   = TCP_51060-02
+        #   IP protocol version = IPV4
+        #   refcnt = 4
+        #   flag   = 0x41000000
+        #   stale  = FALSE
+        #   RBACL ACEs:
+        #     permit tcp dst eq 51060
+        #
+        #   name   = TCP_51144-01
+        #   IP protocol version = IPV4
+        #   refcnt = 10
+        #   flag   = 0x41000000
+        #   stale  = FALSE
+        #   RBACL ACEs:
+        #     permit tcp dst eq 51144
+        #
+        #   name   = TCP_51009-01
+        #   IP protocol version = IPV4
+        #   refcnt = 2
+        #   flag   = 0x41000000
+        #   stale  = FALSE
+        #   RBACL ACEs:
+        #     permit tcp dst eq 51009
+
+
+
+        # RBACL IP Version Supported: IPv4 & IPv6
+        ip_ver_capture = re.compile(r"^RBACL\s+IP\s+Version\s+Supported:\s(?P<ip_ver_support>.*$)")
+        #   name   = TCP_13131-01
+        #   IP protocol version = IPV4
+        #   refcnt = 2
+        #   flag   = 0x41000000
+        #   stale  = FALSE
+        rbacl_capture = re.compile(r"^(?P<rbacl_key>.*)(?==)=\s+(?P<rbacl_value>.*$)")
+        #     permit tcp dst eq 13131
+        rbacl_ace_capture = re.compile(
+            r"^(?P<action>(permit|deny))\s+(?P<protocol>\S+)(\s+(?P<direction>dst|src)\s+((?P<port_condition>)\S+)\s+(?P<port>\d+)|)")
+
+        remove_lines = ('CTS RBACL Policy', '================', 'RBACL ACEs:')
+        
+                # Remove unwanted lines from raw text
+        def filter_lines(raw_output, remove_lines):
+            # Remove empty lines
+            clean_lines = list(filter(None, raw_output.splitlines()))
+            rendered_lines = []
+            for clean_line in clean_lines:
+                clean_line_strip = clean_line.strip()
+                if not clean_line_strip.startswith(remove_lines):
+                    rendered_lines.append(clean_line_strip)
+            return rendered_lines
+
+        out = filter_lines(raw_output=out, remove_lines=remove_lines)
+        rbacl_name = ''
+        rbacl_ace_index = 1
+        for line in out:
+            # RBACL IP Version Supported: IPv4 & IPv6
+            ip_ver_match = ip_ver_capture.match(line)
+            if ip_ver_match:
+                groups = ip_ver_match.groupdict()
+                ip_ver_support = groups['ip_ver_support']
+                if not cts_rbacl_dict.get('cts_rbacl', {}):
+                    cts_rbacl_dict['cts_rbacl'] = {}
+                    cts_rbacl_dict['cts_rbacl']['name'] = {}
+                cts_rbacl_dict['cts_rbacl']['ip_ver_support'] = ip_ver_support
+                continue
+            #   name   = TCP_13131-01
+            #   IP protocol version = IPV4
+            #   refcnt = 2
+            #   flag   = 0x41000000
+            #   stale  = FALSE
+            elif rbacl_capture.match(line):
+                groups = rbacl_capture.match(line).groupdict()
+                rbacl_key = groups['rbacl_key'].strip().lower().replace(' ', '_')
+                rbacl_value = groups['rbacl_value']
+                if rbacl_value.isdigit():
+                    rbacl_value = int(rbacl_value)
+                if rbacl_value == "TRUE" or rbacl_value == "FALSE":
+                    if rbacl_value == "TRUE":
+                        rbacl_value = True
+                    else:
+                        rbacl_value = False
+                if not cts_rbacl_dict.get('cts_rbacl', {}):
+                    cts_rbacl_dict['cts_rbacl'] = {}
+                if rbacl_key == 'name':
+                    rbacl_name = rbacl_value
+                    cts_rbacl_dict['cts_rbacl']['name'][rbacl_name] = {}
+                    rbacl_ace_index = 1
+                else:
+                    cts_rbacl_dict['cts_rbacl']['name'][rbacl_name].update({rbacl_key: rbacl_value})
+                continue
+            #     permit tcp dst eq 13131
+            elif rbacl_ace_capture.match(line):
+                groups = rbacl_ace_capture.match(line).groupdict()
+                ace_group_dict = {}
+                cts_rbacl_dict['cts_rbacl']['name'][rbacl_name]['aces'] = {}
+                if groups['action']:
+                    ace_group_dict.update({'action': groups['action']})
+                if groups['protocol']:
+                    ace_group_dict.update({'protocol': groups['protocol']})
+                if groups['direction']:
+                    ace_group_dict.update({'direction': groups['direction']})
+                if groups['port_condition']:
+                    ace_group_dict.update({'port_condition': groups['port_condition']})
+                if groups['port']:
+                    ace_group_dict.update({'port': int(groups['port'])})
+                if not cts_rbacl_dict['cts_rbacl']['name'][rbacl_name]['aces'].get(rbacl_ace_index, {}):
+                    cts_rbacl_dict['cts_rbacl']['name'][rbacl_name]['aces'][rbacl_ace_index] = ace_group_dict
+                rbacl_ace_index = rbacl_ace_index + 1
+                continue
+        return cts_rbacl_dict
+        
+# ===================================
+# Schema for:
+#  * 'show_cts_sxp_connections_brief'
+# ===================================
+class Show_Cts_Sxp_Connections_BriefSchema(MetaParser):
+    """Schema for show_cts_sxp_connections_brief."""
+
+    schema = {
+    "sxp_connections": {
+        "total_sxp_connections": int,
+        "status": {
+            "sxp_status": str,
+            "highest_version": int,
+            "default_pw": str,
+            Optional("key_chain"): str,
+            Optional("key_chain_name"): str,
+            "source_ip": str,
+            "conn_retry": int,
+            "reconcile_secs": int,
+            "retry_timer": str,
+            "peer_sequence_traverse_limit_for_export": str,
+            "peer_sequence_traverse_limit_for_import":str
+        },
+        Optional("sxp_peers"): {
+            str: {
+                "source_ip": str,
+                "conn_status": str,
+                "duration": str
+            }
+        }
+    }
+    }
+
+
+# ===================================
+# Parser for:
+#  * 'show cts sxp connections brief'
+#  * 'Parser for show cts sxp connections vrf {vrf} brief'
+# ===================================
+class Show_Cts_Sxp_Connections_Brief(Show_Cts_Sxp_Connections_BriefSchema):
+    """Parser for show cts sxp connections brief"""
+    """Parser for show cts sxp connections vrf {vrf} brief"""
+
+    cli_command = ['show cts sxp connections brief', 'show cts sxp connections vrf {vrf} brief']
+
+    def cli(self, output=None):
+        if output is None:
+            out = self.device.execute(self.cli_command[0])
+        else:
+            out = output
+        sxp_dict = {}
+        # There are no SXP Connections.
+        #  SXP              : Enabled
+        #  Highest Version Supported: 4
+        #  Default Password : Set
+        #  Default Key-Chain: Not Set
+        #  Default Key-Chain Name: Not Applicable
+        #  Default Source IP: 192.168.2.24
+        # Connection retry open period: 120 secs
+        # Reconcile period: 120 secs
+        # Retry open timer is not running
+        # Peer-Sequence traverse limit for export: Not Set
+        # Peer-Sequence traverse limit for import: Not Set
+        #
+        # ----------------------------------------------------------------------------------------------------------------------------------
+        # Peer_IP          Source_IP        Conn Status                                          Duration
+        # ----------------------------------------------------------------------------------------------------------------------------------
+        # 10.100.123.1    192.168.2.24   On                                                   44:19:54:52 (dd:hr:mm:sec)
+        # 10.100.123.2    192.168.2.24   On                                                   44:19:54:52 (dd:hr:mm:sec)
+        # 10.100.123.3    192.168.2.24   On                                                   44:19:54:52 (dd:hr:mm:sec)
+        # 10.100.123.4    192.168.2.24   On                                                   44:19:54:52 (dd:hr:mm:sec)
+        # 10.100.123.5    192.168.2.24   On                                                   44:18:58:47 (dd:hr:mm:sec)
+        # 10.100.123.6    192.168.2.24   On                                                   20:12:53:40 (dd:hr:mm:sec)
+        # 10.100.123.7    192.168.2.24   On                                                   44:18:58:47 (dd:hr:mm:sec)
+        # 10.100.123.8    192.168.2.24   On                                                   20:12:40:41 (dd:hr:mm:sec)
+        # 10.100.123.9    192.168.2.24   On                                                   44:18:58:47 (dd:hr:mm:sec)
+        # 10.100.123.10   192.168.2.24   On                                                   44:18:58:47 (dd:hr:mm:sec)
+        # 10.100.123.11   192.168.2.24   On                                                   44:22:21:10 (dd:hr:mm:sec)
+        # 10.100.123.12   192.168.2.24   On                                                   44:18:58:47 (dd:hr:mm:sec)
+        # 10.100.123.13   192.168.2.24   On                                                   45:08:24:37 (dd:hr:mm:sec)
+        # 10.100.123.14   192.168.2.24   On                                                   45:08:24:37 (dd:hr:mm:sec)
+        # 10.100.123.15   192.168.2.24   On                                                   36:11:31:08 (dd:hr:mm:sec)
+        # 10.100.123.16   192.168.2.24   On                                                   36:12:13:50 (dd:hr:mm:sec)
+        #
+        # Total num of SXP Connections = 16
+
+        #  SXP              : Enabled
+        p1 = re.compile(r"\s(?P<sxp_status>(Disabled|Enabled))")
+        #  Highest Version Supported: 4
+        p2 = re.compile(r"\s+(?P<highest_version>\d+)")
+        #  Default Password : Set
+        p3 = re.compile(r"\s+(?P<default_pw>(Not\s+Set|Set))")
+        #  Default Key-Chain: Not Set
+        p4 = re.compile(r"\s+(?P<key_chain>(Not\s+Set|Set))")
+        #  Default Source IP: 192.168.2.24
+        p5 = re.compile(r"\s+(?P<key_chain_name>(Not\s+Applicable|\S+))")
+        #  Default Source IP: 192.168.2.24
+        p6 = re.compile(r"\s+(?P<source_ip>(Not\s+Set|\d+\.\d+\.\d+\.\d+))")
+        # Connection retry open period: 120 secs
+        p7 = re.compile(r"\s+(?P<conn_retry>\d+)")
+        # Reconcile period: 120 secs
+        p8 = re.compile(r"\s+(?P<reconcile_secs>\d+)")
+        # Peer-Sequence traverse limit for export: Not Set
+        p9 = re.compile(r"\s+(?P<peer_sequence_traverse_limit_for_export>(Not\s+Set|\S+))")
+        # Peer-Sequence traverse limit for import: Not Set
+        p10 = re.compile(r"\s+(?P<peer_sequence_traverse_limit_for_import>(Not\s+Set|\S+))")
+        # Retry open timer is not running
+        p11 = re.compile(r"Retry\s+open\s+timer\s+is\s+(?P<retry_timer>(not\s+running|running))")
+        # 10.100.123.12   192.168.2.24   On                                                   44:18:58:47 (dd:hr:mm:sec)
+        p12 = re.compile(
+            r"(?P<peer_ip>\d+\.\d+\.\d+\.\d+)\s+(?P<source_ip>\d+\.\d+\.\d+\.\d+)\s+(?P<conn_status>\S+)\s+(?P<duration>\d+:\d+:\d+:\d+)")
+        # Total num of SXP Connections = 16
+        p13 = re.compile(r"^Total\s+num\s+of\s+SXP\s+Connections\s+=\s+(?P<total_sxp_connections>\d+)")
+
+        # This regex map will be used to split the captured line using ':' as the delimeter
+        # if it starts with this string, we will use this regex pattern.
+        regex_map = {
+            "SXP": p1,
+            "Highest Version Supported": p2,
+            "Default Password": p3,
+            "Default Key-Chain": p4,
+            "Default Key-Chain Name": p5,
+            "Default Source IP": p6,
+            "Connection retry open period": p7,
+            "Reconcile period": p8,
+            "Peer-Sequence traverse limit for export": p9,
+            "Peer-Sequence traverse limit for import": p10,
+            "Retry open timer is not running": p11,
+        }
+
+        # Remove lines with these leading strings
+        remove_lines = ('---', 'Peer_IP')
+
+
+        # Remove unwanted lines from raw text
+        def filter_lines(raw_output, remove_lines):
+            # Remove empty lines
+            clean_lines = list(filter(None, raw_output.splitlines()))
+            for clean_line in clean_lines:
+                clean_line_strip = clean_line.strip()
+                # Remove lines unwanted lines from list of "remove_lines"
+                if clean_line_strip.startswith(remove_lines):
+                    clean_lines.remove(clean_line)
+            return clean_lines
+
+        out = filter_lines(raw_output=out, remove_lines=remove_lines)
+
+        for line in out:
+            line_strip = line.strip()
+            # ':' Will match lines with a colon and will use regex match and assign Key Value based on match.
+            if ": " in line:
+                try:
+                    data_type, value = line_strip.split(':', 1)
+                    regex = regex_map.get(data_type.strip())
+                except ValueError:
+                    continue
+            # Retry open is a one off match that doesn't have a colon.
+            elif "Retry open" in line:
+                # Retry open timer is not running
+                match = p11.match(line_strip)
+                if match:
+                    groups = match.groupdict()
+                    retry_timer = groups['retry_timer']
+                if not sxp_dict.get('sxp_connections'):
+                    sxp_dict.update({"sxp_connections": {}})
+                if not sxp_dict['sxp_connections'].get('status'):
+                    sxp_dict['sxp_connections'].update({"status": {}})
+                sxp_dict["sxp_connections"]['status'].update({'retry_timer': retry_timer})
+                continue
+            elif "Total num of SXP Connections" in line:
+                # Total num of SXP Connections = 16
+                match = p13.match(line_strip)
+                if match:
+                    groups = match.groupdict()
+                    total_sxp_connections = int(groups['total_sxp_connections'])
+                sxp_dict["sxp_connections"]['total_sxp_connections'] = total_sxp_connections
+                continue
+            # All other lines in the output should be p12 and captures peer_ip, source_ip, conn_status, and duration
+            else:
+                # 10.100.123.12   192.168.2.24   On                                                   44:18:58:47 (dd:hr:mm:sec)
+                match = p12.match(line_strip)
+                if match:
+                    groups = match.groupdict()
+                    peer_ip = groups['peer_ip']
+                    source_ip = groups['source_ip']
+                    conn_status = groups['conn_status']
+                    duration = groups['duration']
+                    if not sxp_dict.get('sxp_connections'):
+                        sxp_dict.update({"sxp_connections": {}})
+                    if not sxp_dict['sxp_connections'].get('sxp_peers'):
+                        sxp_dict['sxp_connections'].update({"sxp_peers": {}})
+                    sxp_dict['sxp_connections']['sxp_peers'].update({
+                        peer_ip: {
+                            'source_ip': source_ip,
+                            'conn_status': conn_status,
+                            'duration': duration
+                        }})
+                continue
+            # After all captures are completed, if a regex match exists, assign a key/value to the root dict key.
+            if regex:
+                match = regex.match(value)
+                if match:
+                    groups = match.groupdict()
+                    for k, v in groups.items():
+                        if v is None:
+                            continue
+                        if v.isdigit():
+                            v = int(v)
+                        if not sxp_dict.get('sxp_connections'):
+                            sxp_dict.update({"sxp_connections": {}})
+                        if not sxp_dict['sxp_connections'].get('status'):
+                            sxp_dict['sxp_connections'].update({"status": {}})
+                        sxp_dict['sxp_connections']['status'].update({k: v})
+        if sxp_dict:
+            return sxp_dict
+        else:
+            return {}
+
 # ==================
 # Schema for:
 #  * 'show cts pacs'
@@ -84,6 +470,7 @@ class ShowCtsPacs(ShowCtsPacsSchema):
             return rendered_lines
 
         out = filter_lines(raw_output=out, remove_lines=remove_lines)
+
 
         for line in out:
             # AID: 1100E046659D4275B644BF946EFA49CD
