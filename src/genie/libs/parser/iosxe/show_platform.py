@@ -13,7 +13,9 @@ IOSXE parsers for the following show commands:
     * 'show switch detail'
     * 'show switch'
     * 'show environment all'
+    * 'show platform hardware fed switch active fwd-asic resource tcam utilization'
     * 'show module'
+    * 'show platform hardware qfp active datapath utilization summary'
 '''
 
 # Python
@@ -6394,4 +6396,188 @@ class ShowPlatformHardwareQfpActiveFeatureAppqoe(ShowPlatformHardwareQfpActiveFe
                 key = groups['key'].replace('-', '_').replace(' ', '_').lower()
                 last_dict_ptr.update({key: int(groups['value'])})
 
+        return ret_dict
+
+
+class ShowPlatformTcamUtilizationSchema(MetaParser):
+    """Schema for show platform hardware fed sw active fwd-asic resource tcam utilization """
+    schema = {
+        'asic': {
+            Any(): {
+                'table': {
+                    Any(): {
+                        'subtype': {
+                            Any(): {
+                                'dir': {
+                                    Any(): {
+                                        'max': str,
+                                        'used': str,
+                                        'used_percent': str,
+                                        'v4': str,
+                                        'v6': str,
+                                        'mpls': str,
+                                        'other': str,
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+class ShowPlatformTcamUtilization(ShowPlatformTcamUtilizationSchema):
+    """Parser for show platform hardware fed sw active fwd-asic resource tcam utilization """
+
+    cli_command = 'show platform hardware fed switch active fwd-asic resource tcam utilization'
+
+    def cli(self, output=None):
+        if output is None:
+            out = self.device.execute(self.cli_command)
+        else:
+            out = output
+
+        # initial return dictionary
+        ret_dict = {}
+
+        # initial regexp pattern
+        # CAM Utilization for ASIC  [0]
+        p1 = re.compile(r'CAM +Utilization +for +ASIC  +\[+(?P<asic>(\d+))\]$')
+        
+        #CTS Cell Matrix/VPN
+        #Label                  EM           O       16384        0    0.00%        0        0        0        0
+        #CTS Cell Matrix/VPN
+        #Label                  TCAM         O        1024        1    0.10%        0        0        0        1
+        # Mac Address Table      EM           I       16384       44    0.27%        0        0        0       44
+        # Mac Address Table      TCAM         I        1024       21    2.05%        0        0        0       21
+        p2 = re.compile(r'(?P<table>.*(\S+)) +(?P<subtype>\S+) +(?P<dir>\S+) +(?P<max>\d+) +(?P<used>\d+) +(?P<used_percent>\S+\%) +(?P<v4>\d+) +(?P<v6>\d+) +(?P<mpls>\d+) +(?P<other>\d+)$')
+        
+
+        for line in out.splitlines():
+            line = line.strip()
+
+            # CAM Utilization for ASIC  [0]
+            m = p1.match(line)
+            if m:
+                group = m.groupdict()
+                asic = group['asic']
+                asic_dict = ret_dict.setdefault('asic', {}).setdefault(asic, {})
+                continue
+
+            #CTS Cell Matrix/VPN
+            #Label                  EM           O       16384        0    0.00%        0        0        0        0
+            #CTS Cell Matrix/VPN
+            #Label                  TCAM         O        1024        1    0.10%        0        0        0        1
+            # Mac Address Table      EM           I       16384       44    0.27%        0        0        0       44
+            # Mac Address Table      TCAM         I        1024       21    2.05%        0        0        0       21
+            m = p2.match(line)
+            if m:
+                group = m.groupdict()
+                table_ = group.pop('table')
+                if table_ == 'Label':
+                    table_ = 'CTS Cell Matrix/VPN Label'
+                subtype_ = group.pop('subtype')
+                dir_ = group.pop('dir')
+                dir_dict = asic_dict.setdefault('table', {}). \
+                            setdefault(table_, {}). \
+                            setdefault('subtype', {}). \
+                            setdefault(subtype_, {}). \
+                            setdefault('dir', {}). \
+                            setdefault(dir_, {})
+                dir_dict.update({k: v for k, v in group.items()})
+                continue
+
+        return ret_dict
+
+class ShowPlatformHardwareQfpActiveDatapathUtilSumSchema(MetaParser):
+
+    schema = {
+        'cpp': {
+            Any(): {
+                Any(): {
+                    'pps': {
+                    	'5_secs': int,
+                    	'1_min': int,
+                    	'5_min': int,
+                    	'60_min': int
+                    },
+                    'bps': {
+                    	'5_secs': int,
+                    	'1_min': int,
+                    	'5_min': int,
+                    	'60_min': int
+                    }
+                },
+                'Processing': {
+                    'pct': {
+                    	'5_secs': int,
+                    	'1_min': int,
+                    	'5_min': int,
+                    	'60_min': int
+                    }
+                }
+            }
+        }
+    }
+    
+class ShowPlatformHardwareQfpActiveDatapathUtilSum(ShowPlatformHardwareQfpActiveDatapathUtilSumSchema):
+
+    cli_command = ['show platform hardware qfp active datapath utilization summary']
+
+    def cli(self, output=None):
+
+        # if the user does not provide output to the parser
+        # we need to get it from the device
+        if not output:
+            output = self.device.execute(self.cli_command[0])
+
+
+        #CPP 0:                     5 secs        1 min        5 min       60 min
+        p1 = re.compile(r'^CPP (?P<cpp_num>\d)\: +(\d\s\S+) +(\d\s\S+) +(\d\s\S+) +(\d+\s\S+)$')
+        #Input:     Total (pps)            2            2            1            0
+        p2 = re.compile(r'^(?P<dir>\w+)\: +\S+ \((?P<type>\S+)\) +(?P<value5s>\d+) +(?P<value1m>\d+) +(?P<value5m>\d+) +(?P<value60m>\d+)$')
+        #(bps)         2928         1856         1056           88
+        p3 = re.compile(r'^\((?P<type>bps)\) +(?P<value5s>\d+) +(?P<value1m>\d+) +(?P<value5m>\d+) +(?P<value60m>\d+)$')
+        ret_dict = {}
+        for line in output.splitlines():
+            line = line.strip()
+            #   CPP 0:                     5 secs        1 min        5 min       60 min
+            m = p1.match(line)
+            
+            if m:
+                groups = m.groupdict()
+                cpp_number = groups['cpp_num'].lower()
+                feature_dict = ret_dict.setdefault('cpp', {}).setdefault(cpp_number, {})
+                last_dict_ptr = feature_dict
+                continue
+            
+            #Input:     Total (pps)            2            2            1            0
+            #Processing: Load (pct)            0            0            0            0
+            m = p2.match(line)
+            if m:
+                groups = m.groupdict()
+                dir_dict = feature_dict.setdefault(groups['dir'], {})
+                type_dict = dir_dict.setdefault(groups['type'], {})
+                type_dict.update({'5_secs': int(groups['value5s'])})
+                type_dict.update({'1_min': int(groups['value1m'])})
+                type_dict.update({'5_min': int(groups['value5m'])})
+                type_dict.update({'60_min': int(groups['value60m'])})
+                last_dict_ptr = type_dict
+                continue
+            
+            
+            #(bps)         2928         1856         1056           88
+            m = p3.match(line)
+            if m:
+                groups = m.groupdict()
+                type_dict = dir_dict.setdefault(groups['type'], {})
+                type_dict.update({'5_secs': int(groups['value5s'])})
+                type_dict.update({'1_min': int(groups['value1m'])})
+                type_dict.update({'5_min': int(groups['value5m'])})
+                type_dict.update({'60_min': int(groups['value60m'])})
+                last_dict_ptr = type_dict
+                continue
+        
         return ret_dict
