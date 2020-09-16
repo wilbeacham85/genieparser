@@ -198,7 +198,8 @@ class FileBasedTest(aetest.Testcase):
                     #    start = 1
                     # if not start:
                     #    continue
-                    with steps.start(f"{operating_system} -> {name}") as class_step:
+                    with steps.start(f"{operating_system} -> {name}",
+                                     continue_=True) as class_step:
                         with class_step.start(
                             f"Test Golden -> {operating_system} -> {name}",
                             continue_=True,
